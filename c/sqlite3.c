@@ -250774,6 +250774,33 @@ static Fts5ExprNode *sqlite3Fts5ParseNode(
       }
 
       nByte = SZ_FTS5EXPRNODE(nChild);
+      if( (eType==FTS5_AND || eType==FTS5_OR) && pLeft->eType==eType ){
+        /* Append to the left-hand node instead of copying its children into
+        ** a new one. The parser builds "a OR b OR c ..." left to right, so
+        ** copying would make a chain of N terms cost O(N*N) time. Growing
+        ** the allocation geometrically keeps the whole chain O(N). */
+        if( sqlite3_msize(pLeft)<nByte ){
+          Fts5ExprNode *pNew = (Fts5ExprNode*)sqlite3_realloc64(pLeft, nByte*2);
+          if( pNew==0 ){
+            pParse->rc = SQLITE_NOMEM;
+          }else{
+            pLeft = pNew;
+          }
+        }
+        if( pParse->rc==SQLITE_OK ){
+          pRet = pLeft;
+          fts5ExprAddChildren(pRet, pRight);
+          pLeft = pRight = 0;
+          if( pRet->iHeight>SQLITE_FTS5_MAX_EXPR_DEPTH ){
+            sqlite3Fts5ParseError(pParse,
+                "fts5 expression tree is too large (maximum depth %d)",
+                SQLITE_FTS5_MAX_EXPR_DEPTH
+            );
+            sqlite3Fts5ParseNodeFree(pRet);
+            pRet = 0;
+          }
+        }
+      }else{
       pRet = (Fts5ExprNode*)sqlite3Fts5MallocZero(&pParse->rc, nByte);
 
       if( pRet ){
@@ -250820,6 +250847,7 @@ static Fts5ExprNode *sqlite3Fts5ParseNode(
             pRet = 0;
           }
         }
+      }
       }
     }
   }
